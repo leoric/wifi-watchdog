@@ -1,0 +1,64 @@
+name: Build App
+
+on:
+  push:
+    tags: ['v*'] # Triggers when you push a version tag (e.g. v1.0.0)
+  workflow_dispatch: {} # Allows manual triggers from GitHub UI
+
+jobs:
+  build:
+    runs-on: macos-15 # macOS Sequoia
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build macOS App
+        run: |
+          xcodebuild -project WifiWatchdog.xcodeproj \
+                     -scheme WifiWatchdog \
+                     -configuration Release \
+                     -derivedDataPath build \
+                     -destination 'platform=macOS' \
+                     CODE_SIGN_IDENTITY="" \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGNING_ALLOWED=NO \
+                     clean build
+
+      - name: Stage DMG Folder Structure
+        run: |
+          # Create a temporary folder to organize the DMG contents
+          mkdir -p dmg_staging
+
+          # Copy the compiled .app bundle
+          cp -R build/Build/Products/Release/WifiWatchdog.app dmg_staging/
+
+          # Copy documentation files alongside the app
+          cp README.md dmg_staging/
+
+          # Add a symlink to /Applications for standard drag-and-drop installation
+          ln -s /Applications dmg_staging/Applications
+
+      - name: Create DMG Disk Image
+        run: |
+          hdiutil create -volname "Wifi Watchdog" \
+                         -srcfolder dmg_staging \
+                         -ov \
+                         -format UDZO \
+                         WifiWatchdog.dmg
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WifiWatchdog-DMG
+          path: WifiWatchdog.dmg
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: WifiWatchdog.dmg
+          generate_release_notes: true
